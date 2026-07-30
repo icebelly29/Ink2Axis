@@ -20,18 +20,11 @@ You can install the package via npm:
 npm install svg-skeletonization
 ```
 
-### Important: OpenCV.js Peer Dependency
+### Background Web Worker & OpenCV
 
-`svg-skeletonization` heavily relies on OpenCV for image processing. To keep the bundle size small and prevent WebAssembly loading issues in modern bundlers, OpenCV is **not** bundled directly into this package. 
+Starting from v1.1.0, `svg-skeletonization` uses an inline Web Worker to perform all heavy image processing (like OpenCV perspective transformations and vectorization) in the background. This ensures that the main browser thread is never blocked during scanning. 
 
-You must load `opencv.js` globally in your application. The easiest way to do this is by adding the following script tag to your HTML file:
-
-```html
-<!-- Add this to your index.html -->
-<script async src="https://docs.opencv.org/4.8.0/opencv.js" type="text/javascript"></script>
-```
-
-You must ensure that `cv` is fully initialized before attempting to run the pipeline.
+OpenCV is **not** bundled into the main package to keep sizes small. Instead, the Web Worker will automatically download `opencv.js` from the official CDN (`https://docs.opencv.org/4.8.0/opencv.js`) upon instantiation. You do NOT need to include OpenCV in your HTML file manually.
 
 ## Usage
 
@@ -40,18 +33,15 @@ Here is a basic example of how to use the pipeline to process an image.
 ```javascript
 import { ImageProcessor } from 'svg-skeletonization';
 
-async function processImage(imageElement) {
-    // 1. Ensure OpenCV is fully loaded
-    if (!window.cv || typeof window.cv.Mat !== 'function') {
-        throw new Error("OpenCV is not loaded yet.");
-    }
-
-    // 2. Instantiate the processor
+async function setupAndRun(imageElement) {
+    // 1. Instantiate the processor
     const processor = new ImageProcessor();
 
-    try {
-        // 3. Run the pipeline (One-step execution)
-        const result = await processor.process(imageElement);
+    // 2. Wait for the Web Worker to download and initialize OpenCV
+    processor.onReady(async () => {
+        try {
+            // 3. Run the pipeline (One-step execution)
+            const result = await processor.process(imageElement);
         
         console.log("Processed SVG String:", result.svg);
         console.log("Processed Image Data URL:", result.image);
@@ -60,9 +50,10 @@ async function processImage(imageElement) {
         // Example: Inject SVG into the DOM
         document.getElementById('svg-container').innerHTML = result.svg;
         
-    } catch (error) {
-        console.error("Pipeline failed:", error);
-    }
+        } catch (error) {
+            console.error("Pipeline failed:", error);
+        }
+    });
 }
 ```
 

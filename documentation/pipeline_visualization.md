@@ -12,7 +12,7 @@ sequenceDiagram
     
     User->>App: Uploads Image
     
-    alt Magic Pen Enabled
+    alt Lasso Selection Enabled
         App->>Processor: processor.flatten(canvas)
         Processor->>WarpEngine: normalizePerspective(src, null)
         WarpEngine-->>Processor: returns warped image (Flattened)
@@ -25,7 +25,7 @@ sequenceDiagram
         Processor->>InkExtractor: extractColorPaths(warpedMat, warpedMask)
         InkExtractor-->>Processor: layersData
         Processor-->>App: { svg, image, meta }
-    else Magic Pen Disabled
+    else Lasso Selection Disabled
         App->>Processor: processor.process(canvas, null)
         Processor->>WarpEngine: normalizePerspective(src, null)
         WarpEngine-->>Processor: returns warped image (Flattened)
@@ -39,7 +39,7 @@ sequenceDiagram
 
 ### Key Changes Breakdown:
 
-1. **Two-Step Processing (When Magic Pen is On):**
+1. **Two-Step Processing (When Lasso Selection is On):**
    - The application now immediately isolates the ArUco marker detection and perspective warping (`normalizePerspective`) into its own step called `flatten()`.
    - The user interface waits for this to finish, and *then* displays the flattened canvas in the Lasso modal.
 2. **Post-Lasso Processing:**

@@ -1,132 +1,129 @@
 /**
  * ImageProcessor.js
- * Orchestrates OpenCV ArUco detection, perspective warping, vectorization,
- * skeletonization, path simplification, and layered SVG generation.
+ * Proxy class that communicates with the pipeline Web Worker.
  */
-
-import { WarpEngine } from './WarpEngine.js';
-import { InkExtractor } from './InkExtractor.js';
-import { SvgGenerator } from './SvgGenerator.js';
+import PipelineWorker from './pipeline.worker.js?worker&inline';
 
 export class ImageProcessor {
     constructor() {
-        this.OUTPUT_WIDTH = 2000;
-        this.colorProfiles = {
-            thru_cut: { layer: 'thru_cut', color: '#3b82f6' },
-            score: { layer: 'score', color: '#ef4444' },
-            crease: { layer: 'crease', color: '#22c55e' }
+        this.worker = new PipelineWorker();
+        this.isReady = false;
+        this.readyCallbacks = [];
+        this.msgId = 0;
+        this.pending = {};
+
+        this.worker.onmessage = (e) => {
+            const data = e.data;
+            if (data.type === 'ready') {
+                this.isReady = true;
+                this.readyCallbacks.forEach(cb => cb());
+                this.readyCallbacks = [];
+            } else if (data.type === 'result') {
+                if (this.pending[data.id]) {
+                    this.pending[data.id].resolve(data.result);
+                    delete this.pending[data.id];
+                }
+            } else if (data.type === 'error') {
+                if (this.pending[data.id]) {
+                    this.pending[data.id].reject(new Error(data.error));
+                    delete this.pending[data.id];
+                }
+            }
         };
-        
-        this.warpEngine = new WarpEngine(this.OUTPUT_WIDTH);
-        this.inkExtractor = new InkExtractor(this.colorProfiles);
     }
 
-    async flatten(imageElement) {
-        if (!cv || !cv.Mat) {
-            throw new Error("OpenCV is not initialized yet.");
+    onReady(callback) {
+        if (this.isReady) {
+            callback();
+        } else {
+            this.readyCallbacks.push(callback);
         }
+    }
 
-        console.log("Flattening Image...");
-        let src = cv.imread(imageElement);
+    _post(action, payload, transferables = []) {
+        return new Promise((resolve, reject) => {
+            const id = ++this.msgId;
+            this.pending[id] = { resolve, reject };
+            this.worker.postMessage({ id, action, ...payload }, transferables);
+        });
+    }
+
+    _extractImageData(imageElement) {
+        let w = imageElement.width || imageElement.videoWidth;
+        let h = imageElement.height || imageElement.videoHeight;
         
-        const warpResult = this.warpEngine.normalizePerspective(src, null);
-        src.delete();
-
-        if (!warpResult || !warpResult.image) {
-            throw new Error("Could not detect 4 ArUco markers for bed rectangle.");
+        // If it's a canvas, it has width and height attributes directly.
+        if (imageElement instanceof HTMLCanvasElement) {
+            w = imageElement.width;
+            h = imageElement.height;
         }
 
-        const warpedMat = warpResult.image;
         const canvas = document.createElement('canvas');
-        cv.imshow(canvas, warpedMat);
-        warpedMat.delete();
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(imageElement, 0, 0, w, h);
+        return ctx.getImageData(0, 0, w, h);
+    }
 
+    _createCanvasFromImageData(imgData) {
+        const canvas = document.createElement('canvas');
+        canvas.width = imgData.width;
+        canvas.height = imgData.height;
+        const ctx = canvas.getContext('2d');
+        ctx.putImageData(imgData, 0, 0);
         return canvas;
     }
 
+    async flatten(imageElement) {
+        const imgData = this._extractImageData(imageElement);
+        const result = await this._post('flatten', { imgData }, [imgData.data.buffer]);
+        return this._createCanvasFromImageData(result.imgData);
+    }
+
     async processFlattened(flattenedCanvas, maskCanvas = null) {
-        console.log("Processing Flattened Image...");
-        let warpedMat = cv.imread(flattenedCanvas);
-        let warpedMask = null;
-        
+        const imgData = this._extractImageData(flattenedCanvas);
+        let payload = { imgData };
+        let transferables = [imgData.data.buffer];
+
         if (maskCanvas) {
-            warpedMask = cv.imread(maskCanvas);
-            cv.cvtColor(warpedMask, warpedMask, cv.COLOR_RGBA2GRAY);
+            const maskData = this._extractImageData(maskCanvas);
+            payload.maskData = maskData;
+            transferables.push(maskData.data.buffer);
         }
 
-        // Extract paths by color
-        const layersData = this.inkExtractor.extractColorPaths(warpedMat, this.warpEngine.currentFrameConfig, this.warpEngine.borderSizeMm, warpedMask);
-
-        // Generate Layered SVG
-        const resultLayered = SvgGenerator.generateLayeredSvg(layersData, warpedMat.cols, warpedMat.rows, this.warpEngine.currentFrameConfig);
-        const svgContent = resultLayered.svg;
-        const metaContent = resultLayered.meta;
-
-        const imageUrl = flattenedCanvas.toDataURL('image/jpeg', 0.8);
-
-        warpedMat.delete();
-        if (warpedMask) warpedMask.delete();
-
-        console.log("Pipeline complete.");
+        const result = await this._post('processFlattened', payload, transferables);
+        
+        const canvas = this._createCanvasFromImageData(result.imgData);
+        const imageUrl = canvas.toDataURL('image/jpeg', 0.8);
 
         return {
-            svg: svgContent,
-            image: imageUrl,
-            meta: metaContent
+            svg: result.svg,
+            meta: result.meta,
+            image: imageUrl
         };
     }
 
     async process(imageElement, maskCanvas = null) {
-        if (!cv || !cv.Mat) {
-            throw new Error("OpenCV is not initialized yet.");
-        }
+        const imgData = this._extractImageData(imageElement);
+        let payload = { imgData };
+        let transferables = [imgData.data.buffer];
 
-        console.log("Starting Image Processing Pipeline...");
-
-        let src = cv.imread(imageElement);
-        let srcMask = null;
         if (maskCanvas) {
-            srcMask = cv.imread(maskCanvas);
-            cv.cvtColor(srcMask, srcMask, cv.COLOR_RGBA2GRAY);
+            const maskData = this._extractImageData(maskCanvas);
+            payload.maskData = maskData;
+            transferables.push(maskData.data.buffer);
         }
 
-        // 1. Detect ArUco & Normalize Perspective
-        const warpResult = this.warpEngine.normalizePerspective(src, srcMask);
-        if (!warpResult || !warpResult.image) {
-            src.delete();
-            if (srcMask) srcMask.delete();
-            throw new Error("Could not detect 4 ArUco markers for bed rectangle.");
-        }
-
-        const warpedMat = warpResult.image;
-        const warpedMask = warpResult.mask; // Might be null
-
-        // 2. Extract paths by color
-        const layersData = this.inkExtractor.extractColorPaths(warpedMat, this.warpEngine.currentFrameConfig, this.warpEngine.borderSizeMm, warpedMask);
-
-        // 3. Generate Layered SVG
-        const resultLayered = SvgGenerator.generateLayeredSvg(layersData, warpedMat.cols, warpedMat.rows, this.warpEngine.currentFrameConfig);
-        const svgContent = resultLayered.svg;
-        const metaContent = resultLayered.meta;
-
-        // Prepare return data (SVG text + Image Data URL)
-        const canvas = document.createElement('canvas');
-        cv.imshow(canvas, warpedMat);
+        const result = await this._post('process', payload, transferables);
+        
+        const canvas = this._createCanvasFromImageData(result.imgData);
         const imageUrl = canvas.toDataURL('image/jpeg', 0.8);
 
-        // Cleanup OpenCV mats
-        src.delete();
-        warpedMat.delete();
-        if (srcMask) srcMask.delete();
-        if (warpedMask) warpedMask.delete();
-
-        console.log("Pipeline complete.");
-
         return {
-            svg: svgContent,
-            image: imageUrl,
-            meta: metaContent
+            svg: result.svg,
+            meta: result.meta,
+            image: imageUrl
         };
     }
 }
-

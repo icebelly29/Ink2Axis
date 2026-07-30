@@ -3,7 +3,7 @@ class InkExtractor {
         this.colorProfiles = colorProfiles;
     }
 
-    extractColorPaths(img, frameConfig, borderSizeMm, vectorizationMode = 'skeleton', warpedMask = null) {
+    extractColorPaths(img, frameConfig, borderSizeMm, warpedMask = null) {
         let hsv = new cv.Mat();
         let gray = new cv.Mat();
         cv.cvtColor(img, hsv, cv.COLOR_RGBA2RGB);
@@ -78,7 +78,7 @@ class InkExtractor {
         console.log(`[Ink] Mask pixels: ${cv.countNonZero(allStrokes)}, image: ${img.cols}x${img.rows}`);
 
         // STEP 5: Extract paths
-        let allPaths = this._processMaskToPaths(img.cols, img.rows, allStrokes, vectorizationMode);
+        let allPaths = this._processMaskToPaths(img.cols, img.rows, allStrokes);
         console.log(`[Ink] Total paths: ${allPaths.length}`);
 
         // STEP 6: Classify color by reading original HSV at path points
@@ -264,7 +264,7 @@ class InkExtractor {
         return results;
     }
 
-    _processMaskToPaths(imgWidth, imgHeight, rawMask, vectorizationMode) {
+    _processMaskToPaths(imgWidth, imgHeight, rawMask) {
         let preClosedStrokes = new cv.Mat();
         let preCloseKernel = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(3, 3));
         cv.morphologyEx(rawMask, preClosedStrokes, cv.MORPH_CLOSE, preCloseKernel);
@@ -308,7 +308,7 @@ class InkExtractor {
         let perfectShapes = [];
         let rawPaths = [];
 
-        if (vectorizationMode === 'skeleton') {
+
             // Heavily close the mask just for geometric detection to bridge gaps in hand-drawn shapes
             let shapeMask = new cv.Mat();
             let shapeKernel = cv.getStructuringElement(cv.MORPH_ELLIPSE, new cv.Size(15, 15));
@@ -386,27 +386,7 @@ class InkExtractor {
             }
             contours.delete();
             hierarchy.delete();
-        }
-
-        if (vectorizationMode === 'contour') {
-            let rc = new cv.MatVector();
-            let rh = new cv.Mat();
-            cv.findContours(finalMask, rc, rh, cv.RETR_LIST, cv.CHAIN_APPROX_SIMPLE);
-            for (let i = 0; i < rc.size(); ++i) {
-                let contour = rc.get(i);
-                if (cv.contourArea(contour) < 20) { contour.delete(); continue; }
-                let pts = [];
-                for (let j = 0; j < contour.rows; j++) {
-                    pts.push([contour.data32S[j * 2], contour.data32S[j * 2 + 1]]);
-                }
-                if (pts.length > 0) pts.push([...pts[0]]);
-                rawPaths.push(pts);
-                contour.delete();
-            }
-            rc.delete(); rh.delete();
-        } else {
-            rawPaths = this._vectorizeAndSkeletonize(finalMask);
-        }
+        rawPaths = this._vectorizeAndSkeletonize(finalMask);
         finalMask.delete();
 
         let smoothedPaths = rawPaths.map(path => {
@@ -423,10 +403,6 @@ class InkExtractor {
 
             let diagonal = Math.sqrt(width * width + height * height);
 
-            // For contour mode, use minimal simplification to preserve the exact ink border
-            if (vectorizationMode === 'contour') {
-                return { type: 'path', points: this._simplifyPath(path, 1.0) };
-            }
 
             // For skeleton mode, we want sharp lines. 
             // We use standard Douglas-Peucker simplification which naturally creates straight lines and sharp corners.

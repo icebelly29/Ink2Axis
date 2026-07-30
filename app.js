@@ -44,7 +44,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     let opencvReady = false;
-    let processor = new ImageProcessor();
+    let processor = new SvgSkeletonization.ImageProcessor();
     let communicator = new Communicator();
 
     // Disable upload area until OpenCV loads
@@ -62,14 +62,12 @@ document.addEventListener('DOMContentLoaded', () => {
     // Initialize WebRTC Communicator
     communicator.init();
 
-    // Check OpenCV Ready state
-    const checkOpenCvReady = setInterval(() => {
-        if (typeof cv !== 'undefined' && cv.Mat) {
-            opencvReady = true;
-            uploadArea.classList.remove('disabled');
-            clearInterval(checkOpenCvReady);
-        }
-    }, 500);
+    // Wait for the Web Worker to load OpenCV
+    processor.onReady(() => {
+        opencvReady = true;
+        uploadArea.classList.remove('disabled');
+        console.log("ImageProcessor worker is ready.");
+    });
 
     // Bind Upload Area
     uploadArea.addEventListener('click', () => {
@@ -292,11 +290,20 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const getPos = (e) => {
             const rect = lassoCanvas.getBoundingClientRect();
-            const clientX = e.touches ? e.touches[0].clientX : e.clientX;
-            const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+            let clientX, clientY;
+            if (e.touches && e.touches.length > 0) {
+                clientX = e.touches[0].clientX;
+                clientY = e.touches[0].clientY;
+            } else if (e.changedTouches && e.changedTouches.length > 0) {
+                clientX = e.changedTouches[0].clientX;
+                clientY = e.changedTouches[0].clientY;
+            } else {
+                clientX = e.clientX;
+                clientY = e.clientY;
+            }
             return {
-                x: clientX - rect.left,
-                y: clientY - rect.top
+                x: (clientX - rect.left) * (lassoCanvas.width / rect.width),
+                y: (clientY - rect.top) * (lassoCanvas.height / rect.height)
             };
         };
 
