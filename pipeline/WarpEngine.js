@@ -62,7 +62,8 @@ class WarpEngine {
 
         if (detectedIds.includes(12) || detectedIds.includes(13) || detectedIds.includes(14) || detectedIds.includes(15)) {
             // Custom Frame Generator (IDs 12-15)
-            const urlParams = new URLSearchParams(window.location.search);
+            // Use self.location instead of window.location for Web Worker compatibility
+            const urlParams = new URLSearchParams(self.location.search);
             const customW = parseFloat(urlParams.get('w'));
             const customH = parseFloat(urlParams.get('h'));
             const physWidth = !isNaN(customW) ? customW : 830.0;

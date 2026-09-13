@@ -109,6 +109,9 @@
                         <div id="svg-render-area" class="preview"
                             style="background: white; padding: 1rem; width: 100%; height: auto; box-sizing: border-box;">
                         </div>
+                        <button id="btn-send-gcode" style="margin-top: 1rem; padding: 10px 20px; background: #10b981; color: white; border: none; border-radius: 4px; font-size: 16px; cursor: pointer; display: none;">Generate & Send G-Code to CNC</button>
+                        <p id="gcode-status" style="margin-top: 10px; font-weight: bold;"></p>
+                        <textarea id="gcode-output" style="width: 100%; height: 200px; margin-top: 10px; font-family: monospace; background: #1e1e1e; color: #00ff00; padding: 10px; border-radius: 4px; display: none; box-sizing: border-box;" readonly></textarea>
                     </div>
                 </div>
 
@@ -203,6 +206,46 @@
                     document.getElementById('result-svg').textContent = data.payload.svg;
                     document.getElementById('svg-render-area').innerHTML = data.payload.svg;
                     document.getElementById('overlay-svg').innerHTML = data.payload.svg;
+                    document.getElementById('btn-send-gcode').style.display = 'block';
+                    
+                    // Attach SVG payload to button for sending to Flask backend
+                    document.getElementById('btn-send-gcode').onclick = async () => {
+                        const statusP = document.getElementById('gcode-status');
+                        statusP.textContent = 'Generating G-Code...';
+                        statusP.style.color = 'orange';
+                        
+                        try {
+                            const res = await fetch('/api/gcode/generate', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ svg: data.payload.svg })
+                            });
+                            const result = await res.json();
+                            
+                            if (result.success) {
+                                statusP.textContent = `Success: Generated ${result.path_count} paths. Sending to MCU...`;
+                                document.getElementById('gcode-output').value = result.gcode;
+                                document.getElementById('gcode-output').style.display = 'block';
+                                
+                                const sendRes = await fetch('/api/gcode/send', { method: 'POST' });
+                                const sendResult = await sendRes.json();
+                                
+                                if (sendResult.success) {
+                                    statusP.textContent = `Success: ${sendResult.message}`;
+                                    statusP.style.color = 'green';
+                                } else {
+                                    statusP.textContent = `Error sending to MCU: ${sendResult.error}`;
+                                    statusP.style.color = 'red';
+                                }
+                            } else {
+                                statusP.textContent = `Error generating G-Code: ${result.error}`;
+                                statusP.style.color = 'red';
+                            }
+                        } catch (err) {
+                            statusP.textContent = `Network Error: Could not reach backend server.`;
+                            statusP.style.color = 'red';
+                        }
+                    };
                 }
             });
         });
@@ -236,6 +279,45 @@
                         document.getElementById('result-svg').textContent = data.payload.svg;
                         document.getElementById('svg-render-area').innerHTML = data.payload.svg;
                         document.getElementById('overlay-svg').innerHTML = data.payload.svg;
+                        document.getElementById('btn-send-gcode').style.display = 'block';
+
+                        document.getElementById('btn-send-gcode').onclick = async () => {
+                            const statusP = document.getElementById('gcode-status');
+                            statusP.textContent = 'Generating G-Code...';
+                            statusP.style.color = 'orange';
+                            
+                            try {
+                                const res = await fetch('/api/gcode/generate', {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ svg: data.payload.svg })
+                                });
+                                const result = await res.json();
+                                
+                                if (result.success) {
+                                    statusP.textContent = `Success: Generated ${result.path_count} paths. Sending to MCU...`;
+                                    document.getElementById('gcode-output').value = result.gcode;
+                                    document.getElementById('gcode-output').style.display = 'block';
+                                    
+                                    const sendRes = await fetch('/api/gcode/send', { method: 'POST' });
+                                    const sendResult = await sendRes.json();
+                                    
+                                    if (sendResult.success) {
+                                        statusP.textContent = `Success: ${sendResult.message}`;
+                                        statusP.style.color = 'green';
+                                    } else {
+                                        statusP.textContent = `Error sending to MCU: ${sendResult.error}`;
+                                        statusP.style.color = 'red';
+                                    }
+                                } else {
+                                    statusP.textContent = `Error generating G-Code: ${result.error}`;
+                                    statusP.style.color = 'red';
+                                }
+                            } catch (err) {
+                                statusP.textContent = `Network Error: Could not reach backend server.`;
+                                statusP.style.color = 'red';
+                            }
+                        };
                     }
                 } catch (err) {
                     console.error("Local storage bridge parse error:", err);
