@@ -20,8 +20,8 @@ Ink2Axis lets you make a CNC part with only a pen and paper. It is very good for
    - Red ink: Score Line (Cuts halfway through).
    - Green ink: Crease Line (Folds the material).
 3. **Capture the Image:** You open the web application on your smartphone. You take a picture of the paper.
-4. **Process the Image:** The web application runs in your smartphone browser. It uses OpenCV.js. It does perspective correction, color detection, and skeletonization. It creates an SVG vector file.
-5. **Generate G-Code:** The smartphone sends the SVG file to the Arduino UNO Q over WiFi. A Python server on the UNO Q receives the SVG. It converts the SVG into G-code.
+4. **Process the Image:** The smartphone sends the raw photograph to the Arduino UNO Q over WiFi. A Node.js server on the UNO Q uses OpenCV to do perspective correction, color detection, and skeletonization. It creates an SVG vector file.
+5. **Generate G-Code:** A Python server on the UNO Q receives the SVG. It converts the SVG into G-code.
 6. **Machine the Part:** The Python server sends the G-code to the STM32 microcontroller on the UNO Q. The microcontroller moves the CNC motors.
 
 ## Hardware Components
@@ -35,18 +35,13 @@ Ink2Axis lets you make a CNC part with only a pen and paper. It is very good for
 ## Software Architecture
 
 ### 1. The Mobile Web App (Frontend)
-The frontend uses standard HTML and JavaScript. It does all the heavy image processing on the mobile device. This decreases the load on the Arduino UNO Q.
+The frontend uses standard HTML and JavaScript. It acts as a user interface and camera terminal. The smartphone captures the image and sends it to the Arduino UNO Q.
 
-*   **Warp Engine:** Detects the ArUco markers and flattens the image.
-*   **Ink Extractor:** Separates the different ink colors. It uses a sliding-window majority vote to remove noise.
-*   **Vectorizer:** Converts the pixel lines into clean vector paths.
+### 2. The Edge AI Servers (Node.js & Python)
+The Arduino UNO Q has a powerful Linux environment. We run both Node.js and Python servers here to use the board's Edge AI and compute power.
 
-### 2. The Python Server (Linux Edge)
-The Arduino UNO Q has a Linux environment. We run a Flask web server here.
-
-*   It hosts the frontend web application.
-*   It receives the processed SVG from the smartphone.
-*   It uses a Python script (`gcode_compiler.py`) to convert the SVG paths into standard `G0` and `G1` commands.
+*   **Node.js Vision Server:** Runs the heavy OpenCV computer vision algorithms. It detects the ArUco markers, flattens the image, separates the colors (Warp Engine & Ink Extractor), and generates vector paths.
+*   **Python G-Code Server:** It hosts the frontend web application and converts the SVG paths into standard `G0` and `G1` commands.
 *   It adds a `M0` pause command and a `M6` tool change command when the color changes.
 *   It sends the G-code to the STM32 microcontroller via the internal serial port (`/dev/ttyRPMSG0`).
 
@@ -58,10 +53,11 @@ The STM32 microcontroller runs an Arduino sketch (`uno_q_mcu.ino`). It receives 
 ### Step 1: Install the Software on Arduino UNO Q
 1. Connect your Arduino UNO Q to your local network.
 2. Open an SSH terminal to the board.
-3. Install Python 3 and Flask:
+3. Install Python 3, Flask, Node.js, and the image processing libraries:
    ```bash
    sudo apt update
-   sudo apt install python3 python3-flask python3-serial
+   sudo apt install python3 python3-flask python3-serial nodejs npm
+   sudo apt install build-essential libcairo2-dev libpango1.0-dev libjpeg-dev libgif-dev librsvg2-dev
    ```
 4. Copy the Ink2Axis files to the board.
 
@@ -91,4 +87,4 @@ The STM32 microcontroller runs an Arduino sketch (`uno_q_mcu.ino`). It receives 
 
 ## Conclusion
 
-Ink2Axis shows the power of the Arduino UNO Q. It combines a Linux environment for high-level tasks (web server, SVG parsing) with a real-time microcontroller for hardware control. By doing the image processing on the smartphone, the system is fast and efficient.
+Ink2Axis shows the power of the Arduino UNO Q. It combines a Linux environment for high-level tasks (Edge AI vision processing, SVG parsing, Web server) with a real-time microcontroller for hardware control. By doing the image processing on the board using Node.js, we maximize the hardware's compute power and keep the mobile application fast and lightweight.

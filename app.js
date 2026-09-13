@@ -43,8 +43,8 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    let opencvReady = false;
-    let processor = new SvgSkeletonization.ImageProcessor();
+    let opencvReady = true; // Always ready, using backend
+    let processor = new BackendProcessor();
     let communicator = new Communicator();
 
     // Disable upload area until OpenCV loads
@@ -62,12 +62,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Initialize WebRTC Communicator
     communicator.init();
 
-    // Wait for the Web Worker to load OpenCV
-    processor.onReady(() => {
-        opencvReady = true;
-        uploadArea.classList.remove('disabled');
-        console.log("ImageProcessor worker is ready.");
-    });
+    uploadArea.classList.remove('disabled');
 
     // Bind Upload Area
     uploadArea.addEventListener('click', () => {
@@ -415,5 +410,58 @@ document.addEventListener('DOMContentLoaded', () => {
         previewContainer.style.display = 'none';
         btnOverlayTest.style.display = 'none';
         lucide.createIcons();
+    });
+    
+    // API Wrapper to replace the local ImageProcessor
+    class BackendProcessor {
+        async flatten(canvas) {
+            const formData = new FormData();
+            const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg'));
+            formData.append('image', blob);
+            
+            const res = await fetch('http://' + window.location.hostname + ':3000/api/warp', {
+                method: 'POST',
+                body: formData
+            });
+            if (!res.ok) throw new Error((await res.json()).error);
+            
+            const data = await res.json();
+            const img = new Image();
+            await new Promise(resolve => {
+                img.onload = resolve;
+                img.src = data.image;
+            });
+            
+            const outCanvas = document.createElement('canvas');
+            outCanvas.width = img.width;
+            outCanvas.height = img.height;
+            outCanvas.getContext('2d').drawImage(img, 0, 0);
+            return outCanvas;
+        }
+        
+        async processFlattened(imgCanvas, maskCanvas) {
+            const imageBase64 = imgCanvas.toDataURL('image/jpeg');
+            const maskBase64 = maskCanvas ? maskCanvas.toDataURL('image/png') : null;
+            
+            const res = await fetch('http://' + window.location.hostname + ':3000/api/vectorize', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ imageBase64, maskBase64 })
+            });
+            
+            if (!res.ok) throw new Error((await res.json()).error);
+            const data = await res.json();
+            
+            return {
+                svg: data.svg,
+                image: imageBase64,
+                meta: { dots_per_mm: 5.0, physical_width: 830, physical_height: 1130 }
+            };
+        }
+        
+        async process(imgCanvas, maskCanvas) {
+            const flat = await this.flatten(imgCanvas);
+            return await this.processFlattened(flat, maskCanvas);
+        }
     }
 });
